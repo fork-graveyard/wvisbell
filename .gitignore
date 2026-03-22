@@ -1,0 +1,20 @@
+# Devenv
+.devenv*
+devenv.local.nix
+devenv.local.yaml
+
+# direnv
+.direnv
+
+# pre-commit
+.pre-commit-config.yaml
+
+# Build artifacts
+xvisbell
+wvisbell
+
+# Generated Wayland protocol files
+wlr-layer-shell-client-protocol.h
+wlr-layer-shell-protocol.c
+xdg-shell-client-protocol.h
+xdg-shell-protocol.c
