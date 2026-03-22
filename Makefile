@@ -28,10 +28,13 @@ xdg-shell-client-protocol.h: $(XDG_SHELL_XML)
 xdg-shell-protocol.c: $(XDG_SHELL_XML)
 	wayland-scanner private-code $< $@
 
+lint:
+	clang-tidy wvisbell.c -- $(CFLAGS) $(WAYLAND_CFLAGS)
+
 fmt:
 	clang-format -i wvisbell.c
 
 clean:
 	rm -f wvisbell $(GENERATED_H) $(GENERATED_C)
 
-.PHONY: clean fmt
+.PHONY: clean fmt lint

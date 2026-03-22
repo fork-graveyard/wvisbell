@@ -4,6 +4,7 @@
  *
  */
 
+// NOLINTNEXTLINE(readability-identifier-naming)
 #define _GNU_SOURCE /* for memfd_create */
 #include <stdio.h>
 #include <stdlib.h>
@@ -56,8 +57,9 @@ static void layer_surface_configure(void *data,
   /* Bail out if the compositor gave us a degenerate size. mmap with size 0
    * is undefined behavior on some systems. */
   if (os->width <= 0 || os->height <= 0) {
-    fprintf(stderr, "wvisbell: skipping output with zero dimensions (%dx%d)\n",
-            os->width, os->height);
+    (void)fprintf(
+        stderr, "wvisbell: skipping output with zero dimensions (%dx%d)\n",
+        os->width, os->height);
     return;
   }
 
@@ -84,7 +86,7 @@ static void layer_surface_configure(void *data,
 
   /* Map the file into our address space so we can write pixel data. */
   uint32_t *pixels =
-      mmap(NULL, (size_t)size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+      mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
   if (pixels == MAP_FAILED) {
     perror("wvisbell: mmap");
     close(fd);
@@ -96,7 +98,7 @@ static void layer_surface_configure(void *data,
   for (size_t i = 0; i < pixel_count; i++) {
     pixels[i] = os->fill_color;
   }
-  munmap(pixels, (size_t)size);
+  munmap(pixels, size);
 
   /* Create a wl_shm_pool from our fd, then allocate a buffer from it.
    * The pool is just a container; the buffer describes a rectangle within it.
@@ -172,7 +174,7 @@ static const struct wl_registry_listener registry_listener = {
 int main(int argc, char **argv) {
   /* Parse optional color argument – same scheme as xvisbell. */
   uint32_t rgb = 0xFFFFFF;
-  if (argc > 1)
+  if (argc > 1) {
     switch (argv[1][0]) {
     case 'r':
       rgb = 0xFF0000;
@@ -198,7 +200,10 @@ int main(int argc, char **argv) {
     case 'w':
       rgb = 0xFFFFFF;
       break;
+    default:
+      break;
     }
+  }
   /* ARGB8888: fully opaque alpha + the RGB value. */
   const uint32_t fill_color = 0xFF000000 | rgb;
 
@@ -206,7 +211,7 @@ int main(int argc, char **argv) {
    * var). This is analogous to XOpenDisplay() in X11. */
   struct wl_display *display = wl_display_connect(NULL);
   if (!display) {
-    fprintf(stderr, "Failed to connect to Wayland display\n");
+    (void)fprintf(stderr, "Failed to connect to Wayland display\n");
     return EXIT_FAILURE;
   }
 
@@ -220,8 +225,9 @@ int main(int argc, char **argv) {
   wl_display_roundtrip(display);
 
   if (!compositor || !shm || !layer_shell) {
-    fprintf(stderr, "Compositor missing required interfaces "
-                    "(need wl_compositor, wl_shm, zwlr_layer_shell_v1)\n");
+    (void)fprintf(
+        stderr, "Compositor missing required interfaces "
+                "(need wl_compositor, wl_shm, zwlr_layer_shell_v1)\n");
     wl_display_disconnect(display);
     return EXIT_FAILURE;
   }
