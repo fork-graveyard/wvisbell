@@ -39,37 +39,14 @@ struct output_surface {
 };
 static struct output_surface *outputs = NULL;
 
-/* --- Layer surface configure callback ---
- * The compositor calls this to tell us the actual dimensions we should use.
- * We must ack the configure, then create a pixel buffer and attach it. */
-static void layer_surface_configure(void *data,
-                                    struct zwlr_layer_surface_v1 *lsurface,
-                                    uint32_t serial, uint32_t w, uint32_t h) {
-  struct output_surface *os = data;
-  os->width = (int32_t)w;
-  os->height = (int32_t)h;
-  os->configured = 1;
-
-  /* Acknowledge that we received the configure event. The compositor won't
-   * show our surface until we do this. */
-  zwlr_layer_surface_v1_ack_configure(lsurface, serial);
-
-  /* Bail out if the compositor gave us a degenerate size. mmap with size 0
-   * is undefined behavior on some systems. */
+/* --- Create and attach a solid-color buffer to a surface ---
+ * Allocates a shared-memory buffer, fills it with the given color, and
+ * attaches + commits it to the surface. */
+static void attach_color_buffer(struct output_surface *os, uint32_t color) {
   if (os->width <= 0 || os->height <= 0) {
-    (void)fprintf(
-        stderr, "wvisbell: skipping output with zero dimensions (%dx%d)\n",
-        os->width, os->height);
     return;
   }
 
-  /* --- Create a shared-memory pixel buffer ---
-   * Wayland uses POSIX shared memory to pass pixel data between client and
-   * compositor. The flow is:
-   *   1. Create an anonymous file (memfd) and size it to width*height*4
-   *   2. mmap it so we can write pixels
-   *   3. Wrap it in a wl_shm_pool, then create a wl_buffer from the pool
-   *   4. Fill the buffer with our color, attach to the surface, commit */
   size_t stride = (size_t)os->width * 4; /* 4 bytes per pixel (ARGB8888) */
   size_t size = stride * (size_t)os->height;
 
@@ -84,7 +61,6 @@ static void layer_surface_configure(void *data,
     return;
   }
 
-  /* Map the file into our address space so we can write pixel data. */
   uint32_t *pixels =
       mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
   if (pixels == MAP_FAILED) {
@@ -93,29 +69,45 @@ static void layer_surface_configure(void *data,
     return;
   }
 
-  /* Fill every pixel with our color. */
   size_t pixel_count = (size_t)os->width * (size_t)os->height;
   for (size_t i = 0; i < pixel_count; i++) {
-    pixels[i] = os->fill_color;
+    pixels[i] = color;
   }
   munmap(pixels, size);
 
-  /* Create a wl_shm_pool from our fd, then allocate a buffer from it.
-   * The pool is just a container; the buffer describes a rectangle within it.
-   */
   struct wl_shm_pool *pool = wl_shm_create_pool(shm, fd, (int32_t)size);
   struct wl_buffer *buffer = wl_shm_pool_create_buffer(
       pool, 0, os->width, os->height, (int32_t)stride, WL_SHM_FORMAT_ARGB8888);
   wl_shm_pool_destroy(pool);
   close(fd);
 
-  /* Attach the buffer to the surface and commit to make it visible. */
   wl_surface_attach(os->surface, buffer, 0, 0);
+  wl_surface_damage_buffer(os->surface, 0, 0, os->width, os->height);
   wl_surface_commit(os->surface);
-
-  /* We won't reuse this buffer, so we can destroy our reference now.
-   * The compositor keeps its own reference until it's done displaying. */
   wl_buffer_destroy(buffer);
+}
+
+/* --- Layer surface configure callback ---
+ * The compositor calls this to tell us the actual dimensions we should use.
+ * We must ack the configure, then create a pixel buffer and attach it. */
+static void layer_surface_configure(void *data,
+                                    struct zwlr_layer_surface_v1 *lsurface,
+                                    uint32_t serial, uint32_t w, uint32_t h) {
+  struct output_surface *os = data;
+  os->width = (int32_t)w;
+  os->height = (int32_t)h;
+  os->configured = 1;
+
+  zwlr_layer_surface_v1_ack_configure(lsurface, serial);
+
+  if (os->width <= 0 || os->height <= 0) {
+    (void)fprintf(stderr,
+                  "wvisbell: skipping output with zero dimensions (%dx%d)\n",
+                  os->width, os->height);
+    return;
+  }
+
+  attach_color_buffer(os, os->fill_color);
 }
 
 static void layer_surface_closed(void *data,
@@ -204,6 +196,16 @@ int main(int argc, char **argv) {
       break;
     }
   }
+  /* Parse optional flash count (second argument). */
+  int flash_count = 1;
+  if (argc > 2) {
+    char *end = NULL;
+    long val = strtol(argv[2], &end, 10);
+    if (end != argv[2] && val >= 1) {
+      flash_count = (int)val;
+    }
+  }
+
   /* ARGB8888: fully opaque alpha + the RGB value. */
   const uint32_t fill_color = 0xFF000000 | rgb;
 
@@ -225,9 +227,9 @@ int main(int argc, char **argv) {
   wl_display_roundtrip(display);
 
   if (!compositor || !shm || !layer_shell) {
-    (void)fprintf(
-        stderr, "Compositor missing required interfaces "
-                "(need wl_compositor, wl_shm, zwlr_layer_shell_v1)\n");
+    (void)fprintf(stderr,
+                  "Compositor missing required interfaces "
+                  "(need wl_compositor, wl_shm, zwlr_layer_shell_v1)\n");
     wl_display_disconnect(display);
     return EXIT_FAILURE;
   }
@@ -274,8 +276,29 @@ int main(int argc, char **argv) {
    * compositor before we sleep. */
   wl_display_flush(display);
 
-  /* Flash for 100ms, then exit. The compositor cleans up our surfaces. */
-  usleep(100000);
+  /* Flash on for 100ms. For multiple flashes, swap between the fill color
+   * and a fully transparent buffer to hide/show without re-triggering the
+   * layer surface configure flow. */
+  for (int flash = 0; flash < flash_count; flash++) {
+    if (flash > 0) {
+      /* Show again. */
+      for (struct output_surface *os = outputs; os; os = os->next) {
+        attach_color_buffer(os, fill_color);
+      }
+      wl_display_flush(display);
+    }
+
+    usleep(100000);
+
+    if (flash < flash_count - 1) {
+      /* Hide by replacing with a transparent buffer. */
+      for (struct output_surface *os = outputs; os; os = os->next) {
+        attach_color_buffer(os, 0x00000000);
+      }
+      wl_display_flush(display);
+      usleep(100000);
+    }
+  }
 
   wl_display_disconnect(display);
   return EXIT_SUCCESS;
