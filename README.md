@@ -19,3 +19,10 @@ wvisbell        # single white flash
 wvisbell r      # single red flash
 wvisbell b 3    # three blue flashes
 ```
+
+## Dependencies
+
+- `libwayland-client` (headers and library)
+- `wayland-scanner` (generates C bindings from protocol XML)
+- `wayland-protocols` (xdg-shell protocol XML)
+- `wlr-protocols` (wlr-layer-shell-unstable-v1 protocol XML)
