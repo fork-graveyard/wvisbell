@@ -29,13 +29,12 @@ static struct zwlr_layer_shell_v1 *layer_shell = NULL;
 
 /* We need one overlay surface per monitor. This linked list tracks them. */
 struct output_surface {
+  struct output_surface *next;
   struct wl_output *output;
   struct wl_surface *surface;
   struct zwlr_layer_surface_v1 *layer_surface;
   int32_t width, height; /* filled in by the configure callback */
-  int configured;        /* 1 once the compositor tells us the size */
   uint32_t fill_color;   /* ARGB8888 color to flash */
-  struct output_surface *next;
 };
 static struct output_surface *outputs = NULL;
 
@@ -47,15 +46,15 @@ static void attach_color_buffer(struct output_surface *os, uint32_t color) {
     return;
   }
 
-  size_t stride = (size_t)os->width * 4; /* 4 bytes per pixel (ARGB8888) */
-  size_t size = stride * (size_t)os->height;
+  int32_t stride = os->width * 4; /* 4 bytes per pixel (ARGB8888) */
+  int32_t size = stride * os->height;
 
   int fd = memfd_create("wvisbell-buffer", 0);
   if (fd < 0) {
     perror("wvisbell: memfd_create");
     return;
   }
-  if (ftruncate(fd, (off_t)size) < 0) {
+  if (ftruncate(fd, size) < 0) {
     perror("wvisbell: ftruncate");
     close(fd);
     return;
@@ -69,15 +68,14 @@ static void attach_color_buffer(struct output_surface *os, uint32_t color) {
     return;
   }
 
-  size_t pixel_count = (size_t)os->width * (size_t)os->height;
-  for (size_t i = 0; i < pixel_count; i++) {
+  for (int32_t i = 0; i < os->width * os->height; i++) {
     pixels[i] = color;
   }
   munmap(pixels, size);
 
-  struct wl_shm_pool *pool = wl_shm_create_pool(shm, fd, (int32_t)size);
+  struct wl_shm_pool *pool = wl_shm_create_pool(shm, fd, size);
   struct wl_buffer *buffer = wl_shm_pool_create_buffer(
-      pool, 0, os->width, os->height, (int32_t)stride, WL_SHM_FORMAT_ARGB8888);
+      pool, 0, os->width, os->height, stride, WL_SHM_FORMAT_ARGB8888);
   wl_shm_pool_destroy(pool);
   close(fd);
 
@@ -96,16 +94,8 @@ static void layer_surface_configure(void *data,
   struct output_surface *os = data;
   os->width = (int32_t)w;
   os->height = (int32_t)h;
-  os->configured = 1;
 
   zwlr_layer_surface_v1_ack_configure(lsurface, serial);
-
-  if (os->width <= 0 || os->height <= 0) {
-    (void)fprintf(stderr,
-                  "wvisbell: skipping output with zero dimensions (%dx%d)\n",
-                  os->width, os->height);
-    return;
-  }
 
   attach_color_buffer(os, os->fill_color);
 }
@@ -164,41 +154,40 @@ static const struct wl_registry_listener registry_listener = {
 };
 
 int main(int argc, char **argv) {
+  /* ARGB8888: fully opaque alpha + the RGB value. */
+  uint32_t fill_color = 0xFFFFFFFF;
+
   /* Parse optional color argument – same scheme as xvisbell. */
-  uint32_t rgb = 0xFFFFFF;
   if (argc > 1) {
     switch (argv[1][0]) {
     case 'r':
-      rgb = 0xFF0000;
+      fill_color = 0xFFFF0000;
       break;
     case 'g':
-      rgb = 0x00FF00;
+      fill_color = 0xFF00FF00;
       break;
     case 'b':
-      rgb = 0x0000FF;
+      fill_color = 0xFF0000FF;
       break;
     case 'c':
-      rgb = 0x00FFFF;
+      fill_color = 0xFF00FFFF;
       break;
     case 'm':
-      rgb = 0xFF00FF;
+      fill_color = 0xFFFF00FF;
       break;
     case 'y':
-      rgb = 0xFFFF00;
+      fill_color = 0xFFFFFF00;
       break;
     case 'k':
-      rgb = 0x000000;
+      fill_color = 0xFF000000;
       break;
     case 'w':
-      rgb = 0xFFFFFF;
+      fill_color = 0xFFFFFFFF;
       break;
     default:
       break;
     }
   }
-
-  /* ARGB8888: fully opaque alpha + the RGB value. */
-  const uint32_t fill_color = 0xFF000000 | rgb;
 
   /* Connect to the Wayland compositor (usually via the WAYLAND_DISPLAY env
    * var). This is analogous to XOpenDisplay() in X11. */
