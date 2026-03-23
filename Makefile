@@ -11,10 +11,8 @@ CFLAGS ?= -Wall -Wextra -Wpedantic -Werror -O2
 GENERATED_H := wlr-layer-shell-client-protocol.h xdg-shell-client-protocol.h
 GENERATED_C := wlr-layer-shell-protocol.c xdg-shell-protocol.c
 
-wvisbell: protocols wvisbell.c
-	$(CC) $(CFLAGS) $(WAYLAND_CFLAGS) -o wvisbell wvisbell.c $(GENERATED_C) $(WAYLAND_LIBS)
-
-protocols: $(GENERATED_H) $(GENERATED_C)
+wvisbell: wvisbell.c $(GENERATED_H) $(GENERATED_C)
+	$(CC) $(CFLAGS) $(WAYLAND_CFLAGS) -o $@ $< $(GENERATED_C) $(WAYLAND_LIBS)
 
 wlr-layer-shell-client-protocol.h: $(LAYER_SHELL_XML)
 	wayland-scanner client-header $< $@

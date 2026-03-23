@@ -196,15 +196,6 @@ int main(int argc, char **argv) {
       break;
     }
   }
-  /* Parse optional flash count (second argument). */
-  int flash_count = 1;
-  if (argc > 2) {
-    char *end = NULL;
-    long val = strtol(argv[2], &end, 10);
-    if (end != argv[2] && val >= 1) {
-      flash_count = (int)val;
-    }
-  }
 
   /* ARGB8888: fully opaque alpha + the RGB value. */
   const uint32_t fill_color = 0xFF000000 | rgb;
@@ -276,29 +267,8 @@ int main(int argc, char **argv) {
    * compositor before we sleep. */
   wl_display_flush(display);
 
-  /* Flash on for 100ms. For multiple flashes, swap between the fill color
-   * and a fully transparent buffer to hide/show without re-triggering the
-   * layer surface configure flow. */
-  for (int flash = 0; flash < flash_count; flash++) {
-    if (flash > 0) {
-      /* Show again. */
-      for (struct output_surface *os = outputs; os; os = os->next) {
-        attach_color_buffer(os, fill_color);
-      }
-      wl_display_flush(display);
-    }
-
-    usleep(100000);
-
-    if (flash < flash_count - 1) {
-      /* Hide by replacing with a transparent buffer. */
-      for (struct output_surface *os = outputs; os; os = os->next) {
-        attach_color_buffer(os, 0x00000000);
-      }
-      wl_display_flush(display);
-      usleep(100000);
-    }
-  }
+  /* Flash on for 100ms. */
+  usleep(100000);
 
   wl_display_disconnect(display);
   return EXIT_SUCCESS;
